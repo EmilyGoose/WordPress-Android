@@ -449,6 +449,17 @@ public class Note {
         return queryJSON("body[last].text", "");
     }
 
+    public void setCommentText(final String commentText) {
+        try {
+            final JSONArray body = (JSONArray) mNoteJSON.get("body");
+            final JSONObject bodyCommentObject = (JSONObject) body.get(1);
+            bodyCommentObject.put("text", commentText);
+            mNoteJSON.putOpt("body", body);
+        } catch (JSONException e) {
+            AppLog.e(AppLog.T.NOTIFS, "Failed to set 'body[1].text' property", e);
+        }
+    }
+
     private String getCommentAuthorUrl() {
         JSONArray bodyArray = getBody();
 

@@ -1,8 +1,10 @@
 package org.wordpress.android.ui.comments.viewmodels
 
 import com.nhaarman.mockitokotlin2.any
+import com.nhaarman.mockitokotlin2.doNothing
 import com.nhaarman.mockitokotlin2.eq
 import com.nhaarman.mockitokotlin2.mock
+import com.nhaarman.mockitokotlin2.times
 import com.nhaarman.mockitokotlin2.verify
 import com.nhaarman.mockitokotlin2.whenever
 import kotlinx.coroutines.InternalCoroutinesApi
@@ -14,6 +16,7 @@ import org.mockito.Mock
 import org.wordpress.android.BaseUnitTest
 import org.wordpress.android.R
 import org.wordpress.android.TEST_DISPATCHER
+import org.wordpress.android.datasets.wrappers.NotificationsTableWrapper
 import org.wordpress.android.fluxc.model.SiteModel
 import org.wordpress.android.fluxc.persistence.comments.CommentsDao.CommentEntity
 import org.wordpress.android.fluxc.store.CommentStore.CommentError
@@ -21,6 +24,7 @@ import org.wordpress.android.fluxc.store.CommentStore.CommentErrorType.GENERIC_E
 import org.wordpress.android.fluxc.store.CommentsStore
 import org.wordpress.android.fluxc.store.CommentsStore.CommentsActionPayload
 import org.wordpress.android.fluxc.store.CommentsStore.CommentsData.CommentsActionData
+import org.wordpress.android.models.Note
 import org.wordpress.android.models.usecases.LocalCommentCacheUpdateHandler
 import org.wordpress.android.test
 import org.wordpress.android.ui.comments.unified.CommentEssentials
@@ -47,6 +51,7 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
     @Mock lateinit var resourceProvider: ResourceProvider
     @Mock lateinit var networkUtilsWrapper: NetworkUtilsWrapper
     @Mock lateinit var getCommentUseCase: GetCommentUseCase
+    @Mock lateinit var notificationsTableWrapper: NotificationsTableWrapper
     @Mock private lateinit var localCommentCacheUpdateHandler: LocalCommentCacheUpdateHandler
 
     private lateinit var viewModel: UnifiedCommentsEditViewModel
@@ -61,7 +66,8 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
 
     private val localCommentId = 1000
     private val remoteCommentId = 4321L
-    private val commentIdentifier = SiteCommentIdentifier(localCommentId, remoteCommentId)
+    private val siteCommentIdentifier = SiteCommentIdentifier(localCommentId, remoteCommentId)
+    private val notificationCommentIdentifier = NotificationCommentIdentifier("noteId", remoteCommentId)
 
     @Before
     fun setup() = test {
@@ -77,7 +83,8 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
                 resourceProvider = resourceProvider,
                 networkUtilsWrapper = networkUtilsWrapper,
                 localCommentCacheUpdateHandler = localCommentCacheUpdateHandler,
-                getCommentUseCase = getCommentUseCase
+                getCommentUseCase = getCommentUseCase,
+                notificationsTableWrapper = notificationsTableWrapper
         )
 
         setupObservers()
@@ -85,9 +92,9 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
 
     @Test
     fun `watchers are init on view recreation`() {
-        viewModel.start(site, commentIdentifier)
+        viewModel.start(site, siteCommentIdentifier)
 
-        viewModel.start(site, commentIdentifier)
+        viewModel.start(site, siteCommentIdentifier)
 
         assertThat(uiState.first().shouldInitWatchers).isFalse
         assertThat(uiState.last().shouldInitWatchers).isTrue
@@ -97,7 +104,7 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
     fun `Should display error SnackBar if mapped CommentEssentials is NOT VALID`() = test {
         whenever(getCommentUseCase.execute(site, remoteCommentId))
                 .thenReturn(null)
-        viewModel.start(site, commentIdentifier)
+        viewModel.start(site, siteCommentIdentifier)
         assertThat(onSnackbarMessage.firstOrNull()).isNotNull
     }
 
@@ -105,7 +112,7 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
     fun `Should display correct SnackBar error message if mapped CommentEssentials is NOT VALID`() = test {
         whenever(getCommentUseCase.execute(site, remoteCommentId))
                 .thenReturn(null)
-        viewModel.start(site, commentIdentifier)
+        viewModel.start(site, siteCommentIdentifier)
         val expected = UiStringRes(R.string.error_load_comment)
         val actual = onSnackbarMessage.first().message
         assertEquals(expected, actual)
@@ -113,7 +120,7 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
 
     @Test
     fun `Should show and hide progress after start`() = test {
-        viewModel.start(site, commentIdentifier)
+        viewModel.start(site, siteCommentIdentifier)
 
         assertThat(uiState[0].showProgress).isTrue
         assertThat(uiState[2].showProgress).isFalse
@@ -121,13 +128,13 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
 
     @Test
     fun `Should get comment from GetCommentUseCase`() = test {
-        viewModel.start(site, commentIdentifier)
+        viewModel.start(site, siteCommentIdentifier)
         verify(getCommentUseCase).execute(site, remoteCommentId)
     }
 
     @Test
     fun `Should map CommentIdentifier to CommentEssentials`() = test {
-        viewModel.start(site, commentIdentifier)
+        viewModel.start(site, siteCommentIdentifier)
         assertThat(uiState[1].editedComment).isEqualTo(COMMENT_ESSENTIALS)
     }
 
@@ -135,7 +142,7 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
     fun `Should map CommentIdentifier to default CommentEssentials if CommentIdentifier comment not found`() = test {
         whenever(getCommentUseCase.execute(site, remoteCommentId))
                 .thenReturn(null)
-        viewModel.start(site, commentIdentifier)
+        viewModel.start(site, siteCommentIdentifier)
         assertThat(uiState[1].editedComment).isEqualTo(CommentEssentials())
     }
 
@@ -160,7 +167,7 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
                 .thenReturn(listOf(COMMENT_ENTITY))
         whenever(commentsStore.updateEditComment(eq(site), any()))
                 .thenReturn(CommentsActionPayload(CommentError(GENERIC_ERROR, "error")))
-        viewModel.start(site, commentIdentifier)
+        viewModel.start(site, siteCommentIdentifier)
         viewModel.onActionMenuClicked()
         assertThat(onSnackbarMessage.firstOrNull()).isNotNull
     }
@@ -170,15 +177,8 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
         whenever(commentsStore.getCommentByLocalSiteAndRemoteId(site.id, remoteCommentId))
                 .thenReturn(listOf(COMMENT_ENTITY))
         whenever(commentsStore.updateEditComment(eq(site), any()))
-                .thenReturn(
-                        CommentsActionPayload(
-                                CommentsActionData(
-                                        comments = emptyList(),
-                                        rowsAffected = 0
-                                )
-                        )
-                )
-        viewModel.start(site, commentIdentifier)
+                .thenReturn(CommentsActionPayload(CommentsActionData(emptyList(), 0)))
+        viewModel.start(site, siteCommentIdentifier)
         viewModel.onActionMenuClicked()
         assertThat(uiActionEvent.firstOrNull()).isEqualTo(DONE)
         verify(localCommentCacheUpdateHandler).requestCommentsUpdate()
@@ -186,7 +186,7 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
 
     @Test
     fun `onBackPressed triggers CLOSE when no edits`() {
-        viewModel.start(site, commentIdentifier)
+        viewModel.start(site, siteCommentIdentifier)
         viewModel.onBackPressed()
         assertThat(uiActionEvent.firstOrNull()).isEqualTo(CLOSE)
     }
@@ -199,7 +199,7 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
         whenever(emailFieldType.isValid)
                 .thenReturn { true }
 
-        viewModel.start(site, commentIdentifier)
+        viewModel.start(site, siteCommentIdentifier)
         viewModel.onValidateField("edited user email", emailFieldType)
         viewModel.onBackPressed()
 
@@ -227,7 +227,7 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
 
     @Test
     fun `Should DISABLE edit name for NotificationCommentIdentifier`() {
-        viewModel.start(site, NotificationCommentIdentifier(0L))
+        viewModel.start(site, NotificationCommentIdentifier("id", 0L))
         assertThat(uiState.first().inputSettings.enableEditName).isFalse
     }
 
@@ -239,7 +239,7 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
 
     @Test
     fun `Should DISABLE edit URL for NotificationCommentIdentifier`() {
-        viewModel.start(site, NotificationCommentIdentifier(0L))
+        viewModel.start(site, NotificationCommentIdentifier("id", 0L))
         assertThat(uiState.first().inputSettings.enableEditUrl).isFalse
     }
 
@@ -251,7 +251,7 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
 
     @Test
     fun `Should DISABLE edit email for NotificationCommentIdentifier`() {
-        viewModel.start(site, NotificationCommentIdentifier(0L))
+        viewModel.start(site, NotificationCommentIdentifier("id", 0L))
         assertThat(uiState.first().inputSettings.enableEditEmail).isFalse
     }
 
@@ -263,8 +263,58 @@ class UnifiedCommentsEditViewModelTest : BaseUnitTest() {
 
     @Test
     fun `Should ENABLE edit comment content for NotificationCommentIdentifier`() {
-        viewModel.start(site, NotificationCommentIdentifier(0L))
+        viewModel.start(site, NotificationCommentIdentifier("id", 0L))
         assertThat(uiState.first().inputSettings.enableEditComment).isTrue
+    }
+
+    @Test
+    fun `Should get note from local DB for NotificationCommentIdentifier when onActionMenuClicked is called`() = test {
+        val note = mock<Note>()
+        whenever(commentsStore.updateEditComment(eq(site), any()))
+                .thenReturn(CommentsActionPayload(CommentsActionData(emptyList(), 0)))
+        whenever(commentsStore.getCommentByLocalSiteAndRemoteId(site.id, remoteCommentId))
+                .thenReturn(listOf(COMMENT_ENTITY))
+        whenever(notificationsTableWrapper.getNoteById(notificationCommentIdentifier.noteId))
+                .thenReturn(note)
+        doNothing().whenever(note).setCommentText(any())
+        viewModel.start(site, notificationCommentIdentifier)
+        viewModel.onActionMenuClicked()
+        verify(notificationsTableWrapper).updateNote(note)
+    }
+
+    @Test
+    fun `Should update note in local DB for NotificationCommentIdentifier when onActionMenuClicked is called`() = test {
+        whenever(commentsStore.updateEditComment(eq(site), any()))
+                .thenReturn(CommentsActionPayload(CommentsActionData(emptyList(), 0)))
+        whenever(commentsStore.getCommentByLocalSiteAndRemoteId(site.id, remoteCommentId))
+                .thenReturn(listOf(COMMENT_ENTITY))
+        viewModel.start(site, notificationCommentIdentifier)
+        viewModel.onActionMenuClicked()
+        verify(notificationsTableWrapper).getNoteById(notificationCommentIdentifier.noteId)
+    }
+
+    @Test
+    fun `Should NOT update note in local DB for NotificationCommentIdentifier when note is null`() = test {
+        whenever(commentsStore.getCommentByLocalSiteAndRemoteId(site.id, remoteCommentId))
+                .thenReturn(listOf(COMMENT_ENTITY))
+        viewModel.start(site, notificationCommentIdentifier)
+        viewModel.onActionMenuClicked()
+        verify(notificationsTableWrapper, times(0)).updateNote(any())
+    }
+
+    @Test
+    fun `Should NOT get note for SiteCommentIdentifier when onActionMenuClicked is called`() = test {
+        whenever(commentsStore.getCommentByLocalSiteAndRemoteId(site.id, remoteCommentId))
+                .thenReturn(listOf(COMMENT_ENTITY))
+        viewModel.start(site, siteCommentIdentifier)
+        viewModel.onActionMenuClicked()
+        verify(notificationsTableWrapper, times(0)).getNoteById(notificationCommentIdentifier.noteId)
+    }
+
+    @Test
+    fun `Should NOT update note for SiteCommentIdentifier when onActionMenuClicked is called`() = test {
+        viewModel.onActionMenuClicked()
+        verify(notificationsTableWrapper, times(0)).getNoteById(notificationCommentIdentifier.noteId)
     }
 
     private fun setupObservers() {

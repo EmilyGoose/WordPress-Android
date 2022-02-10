@@ -7,6 +7,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.wordpress.android.R
+import org.wordpress.android.datasets.wrappers.NotificationsTableWrapper
 import org.wordpress.android.fluxc.model.SiteModel
 import org.wordpress.android.fluxc.persistence.comments.CommentsDao.CommentEntity
 import org.wordpress.android.fluxc.store.CommentsStore
@@ -46,7 +47,8 @@ class UnifiedCommentsEditViewModel @Inject constructor(
     private val resourceProvider: ResourceProvider,
     private val networkUtilsWrapper: NetworkUtilsWrapper,
     private val localCommentCacheUpdateHandler: LocalCommentCacheUpdateHandler,
-    private val getCommentUseCase: GetCommentUseCase
+    private val getCommentUseCase: GetCommentUseCase,
+    private val notificationsTableWrapper: NotificationsTableWrapper
 ) : ScopedViewModel(mainDispatcher) {
     private val _uiState = MutableLiveData<EditCommentUiState>()
     private val _uiActionEvent = MutableLiveData<Event<EditCommentActionEvent>>()
@@ -175,6 +177,9 @@ class UnifiedCommentsEditViewModel @Inject constructor(
             launch(bgDispatcher) {
                 setLoadingState(SAVING)
                 updateComment(editedCommentEssentials)
+                if (commentIdentifier is NotificationCommentIdentifier) {
+                    updateNotificationEntity(editedCommentEssentials)
+                }
             }
         }
     }
@@ -248,21 +253,30 @@ class UnifiedCommentsEditViewModel @Inject constructor(
     }
 
     private suspend fun updateCommentEntity(
-        comment: CommentEntity,
+        commentEntity: CommentEntity,
         editedCommentEssentials: CommentEssentials
     ) {
-        val updatedComment = comment.copy(
+        val updatedCommentEntity = commentEntity.copy(
                 authorUrl = editedCommentEssentials.userUrl,
                 authorName = editedCommentEssentials.userName,
                 authorEmail = editedCommentEssentials.userEmail,
                 content = editedCommentEssentials.commentText
         )
-        val result = commentsStore.updateEditComment(site, updatedComment)
+        val result = commentsStore.updateEditComment(site, updatedCommentEntity)
         if (result.isError) {
             showUpdateCommentError()
         } else {
             _uiActionEvent.postValue(Event(DONE))
             localCommentCacheUpdateHandler.requestCommentsUpdate()
+        }
+    }
+
+    private fun updateNotificationEntity(editedCommentEssentials: CommentEssentials) {
+        with(commentIdentifier as NotificationCommentIdentifier) {
+            notificationsTableWrapper.getNoteById(noteId)?.let { note ->
+                note.setCommentText(editedCommentEssentials.commentText)
+                notificationsTableWrapper.updateNote(note)
+            }
         }
     }
 
